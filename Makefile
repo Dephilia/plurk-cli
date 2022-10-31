@@ -1,0 +1,2 @@
+vim-build:
+	cargo run
