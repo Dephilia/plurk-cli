@@ -7,11 +7,12 @@ Plurk API doc: https://www.plurk.com/API
 
 */
 
-use crate::plurkerr::PlurkError;
+use crate::error::PlurkError;
+use crate::utils::*;
 use chrono::{self, DateTime, FixedOffset};
 use reqwest;
 use reqwest_oauth1::{OAuthClientProvider, Secrets, TokenReaderFuture};
-use serde::{Deserialize, Deserializer, Serialize};
+use serde::{Deserialize, Serialize};
 use std::fs::File;
 use std::io;
 use std::io::prelude::*;
@@ -35,14 +36,30 @@ pub struct PlurkKeys {
 }
 
 #[derive(Deserialize, Debug)]
+#[allow(dead_code)]
 pub struct PlurkUser {
     pub id: u64,
-    pub nick_name: String,
+    nick_name: String,
     pub display_name: String,
-    pub full_name: String,
+    full_name: Option<String>,
+    avatar: u64,
+    date_of_birth: Option<WrappedDT>,
+    dateformat: u8,
+    default_lang: String,
+    friend_list_privacy: String,
+    gender: u8,
+    has_profile_image: u8,
+    karma: f32,
+    name_color: Option<String>,
+    premium: bool,
+    status: String,
+    timeline_privacy: u8,
+    uid: Option<u64>,
+    verified_account: bool,
 }
 
 #[derive(Deserialize, Debug)]
+#[allow(dead_code)]
 pub struct PlurkData {
     pub plurk_id: u64,
     #[serde(deserialize_with = "from_rfc2822")]
@@ -51,48 +68,63 @@ pub struct PlurkData {
     pub content_raw: String,
     pub owner_id: u64,
     pub user_id: u64,
+    anonymous: bool,
+    coins: u64,
+    favorers: Vec<u64>,
+    favorite: bool,
+    favorite_count: u64,
+    has_gift: bool,
+    id: Option<u64>,
+    is_unread: u64,
+    lang: String,
+    mentioned: u64,
+    no_comments: u64,
+    plurk_type: u8,
+    porn: bool,
+    publish_to_followers: bool,
+    qualifier: String,
+    replurkable: bool,
+    replurked: bool,
+    replurkers: Vec<u64>,
+    replurkers_count: u64,
+    responded: u64,
+    response_count: u64,
+    responses_seen: u64,
+    with_poll: bool,
+    replurker_id: Option<u64>,
+    excluded: Option<String>,
+    limited_to: Option<String>,
+    last_edited: Option<WrappedDT>,
 }
 
 impl Plurk {
-    pub fn from_toml(path: &str) -> Self {
+    pub fn from_toml(path: &str) -> Result<Self, PlurkError> {
         let path = Path::new(path);
         let display = path.display();
 
-        let mut file = match File::open(&path) {
-            Err(why) => panic!("couldn't open {}: {:?}", display, why),
-            Ok(file) => file,
-        };
+        let mut file =
+            File::open(&path).map_err(|_| PlurkError::IOError(format!("{}", display)))?;
 
         let mut s = String::new();
-        match file.read_to_string(&mut s) {
-            Err(why) => panic!("couldn't read {}: {:?}", display, why),
-            Ok(_) => (),
-        }
+        file.read_to_string(&mut s)
+            .map_err(|_| PlurkError::IOError(format!("{}", display)))?;
 
-        match toml::from_str(s.as_str()) {
-            Err(why) => panic!("parse error {}: {:?}", display, why),
-            Ok(parsed) => parsed,
-        }
+        toml::from_str(s.as_str()).map_err(|_| PlurkError::IOError(format!("{}", display)))
     }
 
-    pub fn to_toml(&self, path: &str) {
+    pub fn to_toml(&self, path: &str) -> Result<(), PlurkError> {
         let path = Path::new(path);
-        let display = path.display();
+        let display = path.display().to_string();
 
-        let mut file = match File::create(&path) {
-            Err(why) => panic!("couldn't create {}: {:?}", display, why),
-            Ok(file) => file,
-        };
+        let mut file =
+            File::create(&path).map_err(|_| PlurkError::IOError(format!("{}", display)))?;
 
-        let s = match toml::to_string(&self) {
-            Err(why) => panic!("parse error {}: {:?}", display, why),
-            Ok(parsed) => parsed,
-        };
+        let s = toml::to_string(&self).map_err(|_| PlurkError::IOError(format!("{}", display)))?;
 
-        match file.write_all(s.as_bytes()) {
-            Err(why) => panic!("couldn't write {}: {:?}", display, why),
-            Ok(_) => (),
-        }
+        file.write_all(s.as_bytes())
+            .map_err(|_| PlurkError::IOError(format!("{}", display)))?;
+
+        Ok(())
     }
 
     pub fn has_token(&self) -> bool {
@@ -103,7 +135,7 @@ impl Plurk {
         }
     }
 
-    pub fn to_secret(&self) -> Secrets {
+    fn to_secret(&self) -> Secrets {
         match &self.oauth_token {
             Some(ot) if (ot.key.is_empty() || ot.secret.is_empty()) => {
                 Secrets::new(self.consumer.key.clone(), self.consumer.secret.clone())
@@ -195,16 +227,7 @@ impl Plurk {
         Ok(())
     }
 
-    pub fn cmd(api: &str) -> String {
+    fn cmd(api: &str) -> String {
         format!("{}{}", BASE_URL, api)
     }
-}
-
-fn from_rfc2822<'de, D>(deserializer: D) -> Result<DateTime<FixedOffset>, D::Error>
-where
-    D: Deserializer<'de>,
-{
-    let s: &str = Deserialize::deserialize(deserializer)?;
-
-    Ok(DateTime::parse_from_rfc2822(&s).unwrap())
 }

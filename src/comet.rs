@@ -1,9 +1,12 @@
+use crate::error::PlurkError;
 use crate::plurk::{Plurk, PlurkData, PlurkUser};
-use crate::plurkerr::PlurkError;
+use crate::utils::*;
+use chrono::{self, DateTime, FixedOffset};
 use regex::Regex;
 use reqwest::Url;
 use serde::Deserialize;
 use serde_qs as qs;
+use std::collections::HashMap;
 use std::time::Duration;
 
 #[derive(Clone, Debug)]
@@ -27,20 +30,43 @@ struct CometDatas {
 }
 
 #[derive(Deserialize, Debug)]
-pub enum CometContentType {
+#[serde(tag = "type")]
+pub enum CometContentUnit {
     #[serde(rename = "new_response")]
-    Response,
+    Response {
+        plurk_id: u64,
+        plurk: PlurkData,
+        response: CometResponse,
+        response_count: u64,
+        user: HashMap<String, PlurkUser>,
+    },
     #[serde(rename = "new_plurk")]
-    Plurk,
+    Plurk(PlurkData),
+    #[serde(rename = "update_notification")]
+    Notification { counts: CometNotiCount },
 }
 
+#[allow(dead_code)]
 #[derive(Deserialize, Debug)]
-pub struct CometContentUnit {
-    #[serde(rename = "type")]
-    pub comet_type: CometContentType,
-    pub plurk_id: u64,
-    // pub plurk: Option<PlurkData>,
-    // pub user: Option<Vec<HashMap<u64, PlurkUser>>>,
+pub struct CometResponse {
+    content: String,
+    content_raw: String,
+    editability: u8,
+    id: u64,
+    lang: String,
+    last_edited: Option<WrappedDT>,
+    plurk_id: u64,
+    #[serde(deserialize_with = "from_rfc2822")]
+    pub posted: DateTime<FixedOffset>,
+    qualifier: String,
+    user_id: u64,
+}
+
+#[allow(dead_code)]
+#[derive(Deserialize, Debug)]
+pub struct CometNotiCount {
+    noti: u32,
+    req: u32,
 }
 
 #[derive(Deserialize, Debug)]
@@ -56,29 +82,23 @@ impl PlurkComet {
         let body = resp
             .json::<UserChannel>()
             .await
-            .map_err(|_| PlurkError::ParseError)?;
+            .map_err(|e| PlurkError::ParseError(e.to_string()))?;
 
         PlurkComet::new(body.comet_server.as_str())
     }
     pub fn new(comet_url: &str) -> Result<Self, PlurkError> {
-        let url = match Url::parse(comet_url) {
-            Ok(u) => u,
-            Err(_) => return Err(PlurkError::ParseError),
-        };
+        let url = Url::parse(comet_url).map_err(|e| PlurkError::ParseError(e.to_string()))?;
         let query = match url.query() {
             Some(q) => q,
             None => return Err(PlurkError::InvalidUrl(comet_url.to_string()).into()),
         };
 
-        let comet_datas: CometDatas = match qs::from_str(query) {
-            Ok(data) => data,
-            Err(_) => return Err(PlurkError::ParseError),
-        };
+        let comet_datas: CometDatas =
+            qs::from_str(query).map_err(|e| PlurkError::ParseError(e.to_string()))?;
 
-        let url = match url.join("comet") {
-            Ok(data) => data,
-            Err(_) => return Err(PlurkError::ParseError),
-        };
+        let url = url
+            .join("comet")
+            .map_err(|e| PlurkError::ParseError(e.to_string()))?;
 
         Ok(PlurkComet {
             base_url: Url::to_string(&url),
@@ -121,15 +141,37 @@ impl PlurkComet {
     }
 
     fn query(comet_callback: &str) -> Result<CometContent, PlurkError> {
-        let re =
-            Regex::new(r"CometChannel.scriptCallback\((.*)\);").or(Err(PlurkError::ParseError))?;
+        let re = Regex::new(r"CometChannel.scriptCallback\((.*)\);")
+            .map_err(|e| PlurkError::InvalidCometData(e.to_string()))?;
         let mat = match re.captures(comet_callback) {
             Some(m) => m,
             None => return Err(PlurkError::InvalidCometData(comet_callback.to_string()).into()),
         };
-        match serde_json::from_str(&mat[1]) {
-            Ok(t) => Ok(t),
-            Err(_) => return Err(PlurkError::InvalidCometData(mat[1].to_string()).into()),
-        }
+        serde_json::from_str(&mat[1])
+            .map_err(|e| PlurkError::InvalidCometData(format!("{}\n{}", e, comet_callback)))
+    }
+
+    pub fn print_comet(comet: CometContentUnit) {
+        match comet {
+            CometContentUnit::Response {
+                plurk_id,
+                plurk,
+                response,
+                response_count: _,
+                user,
+            } => {
+                let display = &user.get(&response.user_id.to_string()).unwrap().display_name;
+                println!("New response: {}", limit_str(&plurk.content_raw, 40));
+                println!(" {} < {}", display, response.content_raw);
+                println!("=> https://www.plurk.com/p/{}", base36_encode(plurk_id));
+            }
+            CometContentUnit::Plurk(p) => {
+                println!("New plurk: {}", limit_str(&p.content_raw, 40));
+                println!("=> https://www.plurk.com/p/{}", base36_encode(p.plurk_id));
+            }
+            CometContentUnit::Notification { counts } => {
+                println!("Notification: {:?}", counts);
+            }
+        };
     }
 }
