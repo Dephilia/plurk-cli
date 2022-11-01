@@ -1,11 +1,7 @@
-/*
-
-plurk.rs
-Copyright (C) 2022 dephilia <me@dephilia.moe>
-Distributed under terms of the MIT license.
-Plurk API doc: https://www.plurk.com/API
-
-*/
+// plurk.rs
+// Copyright (C) 2022 dephilia <me@dephilia.moe>
+// Distributed under terms of the MIT license.
+// Plurk API doc: https://www.plurk.com/API
 
 use crate::error::PlurkError;
 use crate::utils::*;

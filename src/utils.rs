@@ -1,9 +1,7 @@
-//
 // util.rs
-// Copyright (C) 2022 dephilia <dephilia@MacBook-Pro.local>
+// Copyright (C) 2022 dephilia <me@dephilia.moe>
 // Distributed under terms of the MIT license.
-//
-//
+
 use chrono::{self, DateTime, FixedOffset};
 use serde::{Deserialize, Deserializer};
 use std::cmp;
@@ -26,6 +24,7 @@ pub fn base36_encode(value: u64) -> String {
     result.chars().rev().collect::<String>()
 }
 
+#[allow(dead_code)]
 pub fn limit_str(text: &str, limit: usize) -> String {
     let text_size = text.chars().count() as usize;
     let text = match text.find('\n') {

@@ -1,3 +1,7 @@
+// comet.rs
+// Copyright (C) 2022 dephilia <me@dephilia.moe>
+// Distributed under terms of the MIT license.
+
 use crate::error::PlurkError;
 use crate::plurk::{Plurk, PlurkData, PlurkUser};
 use crate::utils::*;

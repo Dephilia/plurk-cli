@@ -1,8 +1,16 @@
-# rust-plurk
+# plurk-cli
 
-A Plurk API 2.0 (Oauth 1) library in rust.
+A command line tool to read plurk.
 
-## Features
+Currently in develop.
 
-- [ ] Oauth base
-- [ ] Oauth token request
+## Feature
+- Poll plurk information dynamically like Twitter
+
+## TODO
+- A rust plurk library
+- More flag, function for cli
+
+## License
+
+MIT

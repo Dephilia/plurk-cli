@@ -1,8 +1,6 @@
-//
 // error.rs
-// Copyright (C) 2022 dephilia <dephilia@MacBook-Pro.local>
+// Copyright (C) 2022 dephilia <me@dephilia.moe>
 // Distributed under terms of the MIT license.
-//
 
 use std::{error::Error, fmt};
 
