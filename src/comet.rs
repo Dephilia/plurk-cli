@@ -35,7 +35,8 @@ pub enum CometContentUnit {
     #[serde(rename = "new_response")]
     Response {
         plurk_id: u64,
-        plurk: PlurkData,
+        #[serde(rename = "plurk")]
+        plurk_data: PlurkData,
         response: CometResponse,
         response_count: u64,
         user: HashMap<String, PlurkUser>,
@@ -113,7 +114,7 @@ impl PlurkComet {
         );
     }
 
-    pub async fn call_once_mut(&mut self) -> Result<Option<Vec<CometContentUnit>>, PlurkError> {
+    pub async fn poll_once_mut(&mut self) -> Result<Option<Vec<CometContentUnit>>, PlurkError> {
         let url = Url::parse_with_params(
             &self.base_url,
             &[
@@ -151,27 +152,71 @@ impl PlurkComet {
             .map_err(|e| PlurkError::InvalidCometData(format!("{}\n{}", e, comet_callback)))
     }
 
-    pub fn print_comet(comet: CometContentUnit) {
+    pub async fn print_comet(plurk: &Plurk, comet: CometContentUnit) -> Result<(), PlurkError> {
+        #[derive(Deserialize)]
+        struct ObjGetPublicProfile {
+            user_info: PlurkUser,
+        }
         match comet {
             CometContentUnit::Response {
                 plurk_id,
-                plurk,
+                plurk_data,
                 response,
                 response_count: _,
                 user,
             } => {
-                let display = &user.get(&response.user_id.to_string()).unwrap().display_name;
-                println!("New response: {}", limit_str(&plurk.content_raw, 40));
-                println!(" {} < {}", display, response.content_raw);
-                println!("=> https://www.plurk.com/p/{}", base36_encode(plurk_id));
+                let resp = plurk
+                    .request_query(
+                        "/APP/Profile/getPublicProfile",
+                        &[("user_id", plurk_data.owner_id)],
+                    )
+                    .await?;
+
+                let plurk_owner = resp
+                    .json::<ObjGetPublicProfile>()
+                    .await
+                    .map_err(|e| PlurkError::ParseError(e.to_string()))?;
+
+                let display_name = plurk_owner.user_info.display_name;
+
+                let response_display_name = &user
+                    .get(&response.user_id.to_string())
+                    .unwrap()
+                    .display_name;
+                println!(
+                    "New response ==> https://www.plurk.com/p/{}",
+                    base36_encode(plurk_id)
+                );
+                println!("{} {}", display_name, plurk_data.qualifier);
+                println!("{}", plurk_data.content_raw);
+                println!(" -------");
+                println!(
+                    "{} {} {}",
+                    response_display_name, response.qualifier, response.content_raw
+                );
             }
             CometContentUnit::Plurk(p) => {
-                println!("New plurk: {}", limit_str(&p.content_raw, 40));
-                println!("=> https://www.plurk.com/p/{}", base36_encode(p.plurk_id));
+                let resp = plurk
+                    .request_query("/APP/Profile/getPublicProfile", &[("user_id", p.owner_id)])
+                    .await?;
+
+                let plurk_owner = resp
+                    .json::<ObjGetPublicProfile>()
+                    .await
+                    .map_err(|e| PlurkError::ParseError(e.to_string()))?;
+
+                let display_name = plurk_owner.user_info.display_name;
+                println!(
+                    "New plurk ==> https://www.plurk.com/p/{}",
+                    base36_encode(p.plurk_id)
+                );
+                println!("{} {}", display_name, p.qualifier);
+                println!("{}", p.content_raw);
             }
             CometContentUnit::Notification { counts } => {
                 println!("Notification: {:?}", counts);
             }
         };
+        Ok(())
     }
 }
