@@ -38,7 +38,7 @@ pub struct PlurkUser {
     pub nick_name: String,
     pub display_name: String,
     pub full_name: Option<String>,
-    pub avatar: u64,
+    pub avatar: Option<u64>,
     pub date_of_birth: Option<WrappedDT>,
     pub dateformat: u8,
     pub default_lang: String,

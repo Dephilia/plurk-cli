@@ -37,7 +37,13 @@ async fn main() -> Result<(), PlurkError> {
 
     println!("Polling Comet...ctrl+c to exit");
     while running.load(Ordering::SeqCst) {
-        let cdata = comet.poll_once_mut().await?;
+        let cdata = match comet.poll_once_mut().await {
+            Ok(d) => d,
+            Err(e) => {
+                println!("{}", e);
+                continue;
+            }
+        };
         if let Some(datas) = cdata {
             for data in datas {
                 PlurkComet::print_comet(&plurk, data).await?;
