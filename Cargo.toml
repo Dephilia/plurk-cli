@@ -1,5 +1,5 @@
 [package]
-name = "rust-plurk"
+name = "plurkcli"
 version = "0.1.0"
 authors = ["Dephilia <me@dephilia.moe>"]
 edition = "2021"
