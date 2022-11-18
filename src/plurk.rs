@@ -9,6 +9,7 @@ use chrono::{self, DateTime, FixedOffset};
 use reqwest;
 use reqwest_oauth1::{OAuthClientProvider, Secrets, TokenReaderFuture};
 use serde::{Deserialize, Serialize};
+use std::fmt;
 use std::fs::File;
 use std::io;
 use std::io::prelude::*;
@@ -225,5 +226,31 @@ impl Plurk {
 
     fn cmd(api: &str) -> String {
         format!("{}{}", BASE_URL, api)
+    }
+}
+
+impl fmt::Display for PlurkUser {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        write!(
+            f,
+            "PlurkUser {}({}) aka. {}",
+            self.nick_name, self.id, self.display_name
+        )
+    }
+}
+
+impl fmt::Display for PlurkData {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        write!(
+            f,
+            "Plurk ==> https://www.plurk.com/p/{}\n\
+            {} {}\n\
+            {}
+            ",
+            base36_encode(self.plurk_id),
+            self.user_id,
+            self.qualifier,
+            self.content_raw
+        )
     }
 }

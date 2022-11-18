@@ -6,12 +6,16 @@ use crate::error::PlurkError;
 use crate::plurk::{Plurk, PlurkData, PlurkUser};
 use crate::utils::*;
 use chrono::{self, DateTime, FixedOffset};
+use colored::Colorize;
 use regex::Regex;
 use reqwest::Url;
 use serde::Deserialize;
 use serde_qs as qs;
 use std::collections::HashMap;
+use std::fmt;
 use std::time::Duration;
+
+const COMET_KNOCK: &str = "https://www.plurk.com/_comet/generic";
 
 #[derive(Clone, Debug)]
 pub struct PlurkComet {
@@ -111,13 +115,6 @@ impl PlurkComet {
             offset: comet_datas.offset,
         })
     }
-    pub fn print(&self) {
-        println!(
-            "<Comet>:\n\tBase Url: {}\n\tChannel: {}\n\tOffset: {}",
-            self.base_url, self.channel, self.offset
-        );
-    }
-
     pub async fn poll_once_mut(&mut self) -> Result<Option<Vec<CometContentUnit>>, PlurkError> {
         let url = Url::parse_with_params(
             &self.base_url,
@@ -156,6 +153,20 @@ impl PlurkComet {
             .map_err(|e| PlurkError::InvalidCometData(format!("{}\n{}", e, comet_callback)))
     }
 
+    pub async fn knock(&self) -> Result<(), PlurkError> {
+        let url = Url::parse_with_params(&COMET_KNOCK, &[("channel", &self.channel)])
+            .map_err(|_| PlurkError::UrlError)?;
+
+        let client = reqwest::Client::new();
+
+        let _res = client
+            .get(url)
+            .send()
+            .await
+            .map_err(|e| PlurkError::ReqwestError(e))?;
+        Ok(())
+    }
+
     pub async fn print_comet(plurk: &Plurk, comet: CometContentUnit) -> Result<(), PlurkError> {
         #[derive(Deserialize)]
         struct ObjGetPublicProfile {
@@ -191,12 +202,30 @@ impl PlurkComet {
                     "New response ==> https://www.plurk.com/p/{}",
                     base36_encode(plurk_id)
                 );
-                println!("{} {}", display_name, plurk_data.qualifier);
+                println!(
+                    "{} {} {}",
+                    plurk_data
+                        .posted
+                        .with_timezone(&chrono::Local)
+                        .format("%Y-%m-%d %H:%M:%S")
+                        .to_string()
+                        .yellow(),
+                    display_name.bold().bright_blue(),
+                    plurk_data.qualifier.black().on_bright_white()
+                );
                 println!("{}", plurk_data.content_raw);
                 println!(" -------");
                 println!(
-                    "{} {} {}",
-                    response_display_name, response.qualifier, response.content_raw
+                    "{} {} {} {}",
+                    response
+                        .posted
+                        .with_timezone(&chrono::Local)
+                        .format("%Y-%m-%d %H:%M:%S")
+                        .to_string()
+                        .yellow(),
+                    response_display_name.bold().bright_magenta(),
+                    response.qualifier.black().on_bright_white(),
+                    response.content_raw
                 );
             }
             CometContentUnit::Plurk(p) => {
@@ -214,7 +243,16 @@ impl PlurkComet {
                     "New plurk ==> https://www.plurk.com/p/{}",
                     base36_encode(p.plurk_id)
                 );
-                println!("{} {}", display_name, p.qualifier);
+                println!(
+                    "{} {} {}",
+                    p.posted
+                        .with_timezone(&chrono::Local)
+                        .format("%Y-%m-%d %H:%M:%S")
+                        .to_string()
+                        .bright_yellow(),
+                    display_name.bold().bright_blue(),
+                    p.qualifier.black().on_bright_white()
+                );
                 println!("{}", p.content_raw);
             }
             CometContentUnit::Notification { counts } => {
@@ -222,5 +260,14 @@ impl PlurkComet {
             }
         };
         Ok(())
+    }
+}
+impl fmt::Display for PlurkComet {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        write!(
+            f,
+            "<Comet>:\n\tBase Url: {}\n\tChannel: {}\n\tOffset: {}",
+            self.base_url, self.channel, self.offset
+        )
     }
 }

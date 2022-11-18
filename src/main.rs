@@ -2,58 +2,66 @@
 // Copyright (C) 2022 dephilia <me@dephilia.moe>
 // Distributed under terms of the MIT license.
 
+mod app;
 mod comet;
 mod error;
 mod plurk;
 mod utils;
 
-use comet::PlurkComet;
+use app::*;
+use clap::CommandFactory;
+use clap::Parser;
 use error::PlurkError;
 use plurk::Plurk;
-use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::Arc;
-use terminal_size::{terminal_size, Width};
 use tokio;
+
+#[derive(Parser, Debug)]
+#[command(author, version, about, long_about = None)]
+struct Args {
+    #[arg(short, long, default_value_t = String::from("key.toml"))]
+    key_file: String,
+
+    #[arg(short, long, default_value_t = false)]
+    comet: bool,
+
+    #[arg(short, long, default_value_t = false)]
+    me: bool,
+
+    #[arg(short, long, default_value_t = false)]
+    timeline: bool,
+
+    #[arg(short, long, default_value_t = false, requires = "timeline")]
+    verbose: bool,
+}
 
 #[tokio::main]
 async fn main() -> Result<(), PlurkError> {
-    let mut plurk = Plurk::from_toml("key.toml")?;
+    let args = Args::parse();
+
+    let mut plurk = Plurk::from_toml(&args.key_file)?;
 
     if !plurk.has_token() {
         plurk.acquire_plurk_key().await?;
-        plurk.to_toml("key.toml")?;
+        plurk.to_toml(&args.key_file)?;
     }
 
-    let mut comet = PlurkComet::from_plurk(plurk.clone()).await?;
-    comet.print();
-
-    let running = Arc::new(AtomicBool::new(true));
-    let r = running.clone();
-
-    ctrlc::set_handler(move || {
-        r.store(false, Ordering::SeqCst);
-    })
-    .expect("Error setting Ctrl-C handler");
-
-    println!("Polling Comet...ctrl+c to exit");
-    while running.load(Ordering::SeqCst) {
-        let cdata = match comet.poll_once_mut().await {
-            Ok(d) => d,
-            Err(e) => {
-                println!("{}", e);
-                continue;
-            }
-        };
-        if let Some(datas) = cdata {
-            for data in datas {
-                PlurkComet::print_comet(&plurk, data).await?;
-                if let Some((Width(w), _)) = terminal_size() {
-                    println!("{}", "=".repeat(w.into()));
-                }
-            }
-        };
+    if args.me {
+        print_me(plurk.clone()).await?;
+        return Ok(());
     }
-    println!("Goodbye!");
+
+    if args.comet {
+        poll_comet(plurk.clone()).await?;
+        return Ok(());
+    }
+
+    if args.timeline {
+        print_timeline(plurk.clone(), args.verbose).await?;
+        return Ok(());
+    }
+
+    let mut cmd = Args::command();
+    cmd.print_help().unwrap();
 
     Ok(())
 }
