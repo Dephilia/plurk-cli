@@ -95,6 +95,33 @@ pub struct PlurkData {
 }
 
 impl Plurk {
+    pub fn new(
+        consumer_key: String,
+        consumer_secret: String,
+        token_key: Option<String>,
+        token_secret: Option<String>,
+    ) -> Self {
+        if let (Some(tk), Some(ts)) = (token_key, token_secret) {
+            Self {
+                consumer: PlurkKeys {
+                    key: consumer_key,
+                    secret: consumer_secret,
+                },
+                oauth_token: Some(PlurkKeys {
+                    key: tk,
+                    secret: ts,
+                }),
+            }
+        } else {
+            Self {
+                consumer: PlurkKeys {
+                    key: consumer_key,
+                    secret: consumer_secret,
+                },
+                oauth_token: None,
+            }
+        }
+    }
     pub fn from_toml(path: &str) -> Result<Self, PlurkError> {
         let path = Path::new(path);
         let display = path.display();
@@ -109,9 +136,8 @@ impl Plurk {
         toml::from_str(s.as_str()).map_err(|_| PlurkError::IOError(format!("{}", display)))
     }
 
-    pub fn to_toml(&self, path: &str) -> Result<(), PlurkError> {
-        let path = Path::new(path);
-        let display = path.display().to_string();
+    pub fn to_toml<P: AsRef<Path>>(&self, path: P) -> Result<(), PlurkError> {
+        let display = path.as_ref().display().to_string();
 
         let mut file =
             File::create(&path).map_err(|_| PlurkError::IOError(format!("{}", display)))?;
@@ -192,8 +218,11 @@ impl Plurk {
             BASE_URL, AUTHORIZE_URL, resp.oauth_token
         );
         println!("Please access to: {}", endpoint_authorize);
+        print!("Input pin:");
+        io::stdout()
+            .flush()
+            .map_err(|_| PlurkError::IOError(String::from("IO error")))?;
 
-        print!("Input pin: ");
         let mut user_input = String::new();
         io::stdin()
             .read_line(&mut user_input)

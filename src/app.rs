@@ -7,8 +7,11 @@ use crate::error::PlurkError;
 use crate::plurk::{Plurk, PlurkData, PlurkUser};
 use crate::utils::base36_encode;
 use colored::Colorize;
+use dirs;
 use serde::Deserialize;
 use std::collections::HashMap;
+use std::fs;
+use std::path::PathBuf;
 use terminal_size::{terminal_size, Width};
 use tokio::signal;
 
@@ -121,4 +124,50 @@ pub async fn poll_comet(plurk: Plurk) -> Result<(), PlurkError> {
         output = comet_loop(plurk) => output,
         _ = signal::ctrl_c() => Ok(()),
     }
+}
+
+pub fn gen_key_file(
+    consumer_key: String,
+    consumer_secret: String,
+    token_key: Option<String>,
+    token_secret: Option<String>,
+) -> Result<(), PlurkError> {
+    let plurk = Plurk::new(consumer_key, consumer_secret, token_key, token_secret);
+    let config_dir = match dirs::config_dir() {
+        Some(dir) => dir,
+        None => PathBuf::from("."),
+    };
+    let config_dir = config_dir.join("plurk-cli");
+    let display = config_dir.display();
+    fs::create_dir_all(config_dir.clone())
+        .map_err(|_| PlurkError::IOError(format!("Cannot create dir: {}", display)))?;
+
+    let config_file = config_dir.join("key.toml");
+    let display = config_file.display();
+    plurk
+        .to_toml(config_file.clone())
+        .map_err(|_| PlurkError::IOError(format!("Cannot access file: {}", display)))?;
+    Ok(())
+}
+
+pub fn get_key_file() -> Result<PathBuf, PlurkError> {
+    let config_dir = match dirs::config_dir() {
+        Some(dir) => dir,
+        None => PathBuf::from("."),
+    };
+    let config_dir = config_dir.join("plurk-cli");
+    let display = config_dir.display();
+    fs::create_dir_all(config_dir.clone())
+        .map_err(|_| PlurkError::IOError(format!("Cannot create dir: {}", display)))?;
+
+    let config_file = config_dir.join("key.toml");
+    Ok(config_file)
+}
+
+pub fn get_key_file_string() -> String {
+    get_key_file()
+        .unwrap()
+        .into_os_string()
+        .into_string()
+        .unwrap()
 }

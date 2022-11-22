@@ -18,8 +18,20 @@ use tokio;
 #[derive(Parser, Debug)]
 #[command(author, version, about, long_about = None)]
 struct Args {
-    #[arg(short, long, default_value_t = String::from("key.toml"))]
+    #[arg(short, long, default_value_t = get_key_file_string())]
     key_file: String,
+
+    #[arg(short, long, default_value_t = false)]
+    gen_key: bool,
+
+    #[arg(long)]
+    consumer_key: Option<String>,
+    #[arg(long)]
+    consumer_secret: Option<String>,
+    #[arg(long)]
+    token_key: Option<String>,
+    #[arg(long)]
+    token_secret: Option<String>,
 
     #[arg(short, long, default_value_t = false)]
     comet: bool,
@@ -37,6 +49,20 @@ struct Args {
 #[tokio::main]
 async fn main() -> Result<(), PlurkError> {
     let args = Args::parse();
+
+    if args.gen_key {
+        if let (Some(ck), Some(cs)) = (args.consumer_key, args.consumer_secret) {
+            gen_key_file(ck, cs, args.token_key, args.token_secret)?;
+        } else {
+            println!("Missing argument: --consumer-key, --consumer-secret");
+        }
+        return Ok(());
+    }
+
+    if !get_key_file()?.as_path().exists() {
+        println!("Config file not exist.");
+        return Ok(());
+    }
 
     let mut plurk = Plurk::from_toml(&args.key_file)?;
 
