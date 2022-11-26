@@ -9,85 +9,88 @@ mod plurk;
 mod utils;
 
 use app::*;
-use clap::CommandFactory;
-use clap::Parser;
+use clap::{CommandFactory, Parser, Subcommand};
 use error::PlurkError;
 use plurk::Plurk;
 use tokio;
 
-#[derive(Parser, Debug)]
+#[derive(Parser)]
 #[command(author, version, about, long_about = None)]
-struct Args {
+#[command(propagate_version = true)]
+struct Cli {
+    #[command(subcommand)]
+    command: Option<Commands>,
+
     #[arg(short, long, default_value_t = get_key_file_string())]
     key_file: String,
+}
 
-    #[arg(short, long, default_value_t = false)]
-    gen_key: bool,
+#[derive(Subcommand)]
+enum Commands {
+    GenKey {
+        consumer_key: String,
+        consumer_secret: String,
+        token_key: Option<String>,
+        token_secret: Option<String>,
+    },
+    Comet,
 
-    #[arg(long)]
-    consumer_key: Option<String>,
-    #[arg(long)]
-    consumer_secret: Option<String>,
-    #[arg(long)]
-    token_key: Option<String>,
-    #[arg(long)]
-    token_secret: Option<String>,
+    Me,
 
-    #[arg(short, long, default_value_t = false)]
-    comet: bool,
-
-    #[arg(short, long, default_value_t = false)]
-    me: bool,
-
-    #[arg(short, long, default_value_t = false)]
-    timeline: bool,
-
-    #[arg(short, long, default_value_t = false, requires = "timeline")]
-    verbose: bool,
+    Timeline {
+        #[arg(short, long)]
+        verbose: bool,
+        #[arg(short, long, default_value_t = 20)]
+        limit: u64,
+    },
 }
 
 #[tokio::main]
 async fn main() -> Result<(), PlurkError> {
-    let args = Args::parse();
+    let cli = Cli::parse();
 
-    if args.gen_key {
-        if let (Some(ck), Some(cs)) = (args.consumer_key, args.consumer_secret) {
-            gen_key_file(ck, cs, args.token_key, args.token_secret)?;
-        } else {
-            println!("Missing argument: --consumer-key, --consumer-secret");
-        }
+    /* Gen Key need to put here */
+    if let Some(Commands::GenKey {
+        consumer_key,
+        consumer_secret,
+        token_key,
+        token_secret,
+    }) = &cli.command
+    {
+        gen_key_file(
+            consumer_key.clone(),
+            consumer_secret.clone(),
+            token_key.clone(),
+            token_secret.clone(),
+        )?;
         return Ok(());
     }
 
-    if !get_key_file()?.as_path().exists() {
-        println!("Config file not exist.");
-        return Ok(());
-    }
-
-    let mut plurk = Plurk::from_toml(&args.key_file)?;
+    let mut plurk = Plurk::from_toml(&cli.key_file)?;
 
     if !plurk.has_token() {
         plurk.acquire_plurk_key().await?;
-        plurk.to_toml(&args.key_file)?;
+        plurk.to_toml(&cli.key_file)?;
     }
 
-    if args.me {
-        print_me(plurk.clone()).await?;
-        return Ok(());
+    match &cli.command {
+        Some(Commands::GenKey { .. }) => {
+            // Bypass here
+        }
+        Some(Commands::Me) => {
+            print_me(plurk.clone()).await?;
+        }
+        Some(Commands::Comet) => {
+            poll_comet(plurk.clone()).await?;
+        }
+        Some(Commands::Timeline { verbose, limit }) => {
+            print_timeline(plurk.clone(), verbose.clone(), limit.clone()).await?;
+        }
+        None => {
+            let mut cmd = Cli::command();
+            cmd.print_help().unwrap();
+        }
     }
-
-    if args.comet {
-        poll_comet(plurk.clone()).await?;
-        return Ok(());
-    }
-
-    if args.timeline {
-        print_timeline(plurk.clone(), args.verbose).await?;
-        return Ok(());
-    }
-
-    let mut cmd = Args::command();
-    cmd.print_help().unwrap();
 
     Ok(())
 }

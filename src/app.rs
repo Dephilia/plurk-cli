@@ -21,12 +21,15 @@ struct ObjGetPlurks {
     plurk_users: Option<HashMap<u64, PlurkUser>>,
 }
 
-pub async fn print_timeline(plurk: Plurk, verbose: bool) -> Result<(), PlurkError> {
+pub async fn print_timeline(plurk: Plurk, verbose: bool, limit: u64) -> Result<(), PlurkError> {
     let now = chrono::offset::Utc::now();
     let time = now - chrono::Duration::days(1);
     let time = time.to_rfc3339_opts(chrono::SecondsFormat::Secs, true);
     let resp = plurk
-        .request_query("/APP/Polling/getPlurks", &[("offset", &time)])
+        .request_query(
+            "/APP/Polling/getPlurks",
+            &[("offset", &time), ("limit", &limit.to_string())],
+        )
         .await?;
     let body = resp
         .json::<ObjGetPlurks>()
