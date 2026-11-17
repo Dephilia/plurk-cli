@@ -106,6 +106,79 @@ pub struct GetPlurk {
 }
 
 #[derive(Deserialize, Debug)]
+pub struct SuccessText {
+    pub success_text: String,
+}
+
+#[derive(Deserialize, Debug)]
+pub struct ReplurkItem {
+    pub success: bool,
+    #[serde(default)]
+    pub error: String,
+}
+
+#[derive(Deserialize, Debug)]
+pub struct ReplurkResult {
+    pub success: bool,
+    #[serde(default)]
+    pub results: HashMap<String, ReplurkItem>,
+}
+
+#[derive(Deserialize, Debug, Default)]
+pub struct UnreadCount {
+    #[serde(default)]
+    pub all: u64,
+    #[serde(default)]
+    pub my: u64,
+    #[serde(default)]
+    pub private: u64,
+    #[serde(default)]
+    pub responded: u64,
+}
+
+fn opt_rfc2822<'de, D>(d: D) -> Result<Option<DateTime<Utc>>, D::Error>
+where
+    D: Deserializer<'de>,
+{
+    let s = Option::<String>::deserialize(d)?;
+    Ok(s.and_then(|s| {
+        DateTime::parse_from_rfc2822(&s)
+            .ok()
+            .map(|t| t.with_timezone(&Utc))
+    }))
+}
+
+#[derive(Deserialize, Debug, Clone)]
+pub struct Alert {
+    #[serde(rename = "type", default)]
+    pub kind: String,
+    #[serde(default, deserialize_with = "opt_rfc2822")]
+    pub posted: Option<DateTime<Utc>>,
+    pub plurk_id: Option<u64>,
+    pub from_user: Option<User>,
+    pub to_user: Option<User>,
+    pub new_fan: Option<User>,
+    pub new_friend: Option<User>,
+    pub friend_info: Option<User>,
+    pub owner: Option<User>,
+}
+
+impl Alert {
+    pub fn actor(&self) -> Option<&User> {
+        [
+            &self.from_user,
+            &self.new_fan,
+            &self.new_friend,
+            &self.friend_info,
+            &self.owner,
+            &self.to_user,
+        ]
+        .into_iter()
+        .find_map(|u| u.as_ref())
+    }
+}
+
+#[derive(Deserialize, Debug)]
 pub struct Profile {
     pub user_info: User,
 }
@@ -181,6 +254,62 @@ mod tests {
             assert_eq!(g.plurk.plurk_id, 90812);
             assert_eq!(g.user.name(), "amix3");
         }
+    }
+
+    #[test]
+    fn ok_replies() {
+        let s: SuccessText = serde_json::from_str(r#"{"success_text": "ok"}"#).unwrap();
+        assert_eq!(s.success_text, "ok");
+        let r: ReplurkResult = serde_json::from_str(
+            r#"{"success": true, "results": {"342": {"success": true, "error":""}}}"#,
+        )
+        .unwrap();
+        assert!(r.success && r.results["342"].success);
+        let r: ReplurkResult = serde_json::from_str(
+            r#"{"success": false, "results": {"1": {"success": false, "error": "x"}}}"#,
+        )
+        .unwrap();
+        assert_eq!(r.results["1"].error, "x");
+    }
+
+    #[test]
+    fn unread_count() {
+        let u: UnreadCount =
+            serde_json::from_str(r#"{"all": 2, "my": 1, "private": 1, "responded": 0}"#).unwrap();
+        assert_eq!((u.all, u.my, u.private, u.responded), (2, 1, 1, 0));
+    }
+
+    #[test]
+    fn alert_samples() {
+        let u = r#"{"id": 9, "nick_name": "frodo_b"}"#;
+        let d = "Fri, 05 Jun 2009 23:07:13 GMT";
+        let cases = [
+            ("friendship_request", "from_user", false),
+            ("friendship_pending", "to_user", false),
+            ("new_fan", "new_fan", false),
+            ("friendship_accepted", "friend_info", false),
+            ("new_friend", "new_friend", false),
+            ("private_plurk", "owner", true),
+            ("plurk_liked", "from_user", true),
+            ("plurk_replurked", "from_user", true),
+            ("mentioned", "from_user", true),
+            ("my_responded", "from_user", true),
+        ];
+        for (kind, field, has_plurk) in cases {
+            let extra = if has_plurk {
+                r#", "plurk_id": 77, "num_others": 1, "response_id": null"#
+            } else {
+                ""
+            };
+            let body = format!(r#"{{"type": "{kind}", "{field}": {u}, "posted": "{d}"{extra}}}"#);
+            let a: Alert = serde_json::from_str(&body).unwrap();
+            assert_eq!(a.kind, kind);
+            assert_eq!(a.actor().unwrap().nick_name, "frodo_b");
+            assert_eq!(a.plurk_id.is_some(), has_plurk);
+            assert!(a.posted.is_some());
+        }
+        let a: Alert = serde_json::from_str(r#"{"type": "future_kind"}"#).unwrap();
+        assert!(a.actor().is_none() && a.posted.is_none());
     }
 
     #[test]

@@ -1,6 +1,6 @@
 use crate::client::Client;
-use crate::error::Result;
-use crate::model::{GetPlurk, ResponseList};
+use crate::error::{Error, Result};
+use crate::model::{GetPlurk, ReplurkResult, ResponseList, SuccessText};
 use crate::render::{self, base36_decode, plurk_url};
 use serde::Deserialize;
 
@@ -107,6 +107,45 @@ pub async fn show(client: &Client, plurk_id: u64, count: Option<u64>) -> Result<
     Ok(())
 }
 
+pub fn ids_params(ids: &[u64]) -> Params {
+    let list = ids.iter().map(u64::to_string).collect::<Vec<_>>().join(",");
+    vec![("ids", format!("[{list}]"))]
+}
+
+pub async fn set_flag(client: &Client, path: &str, ids: &[u64]) -> Result<()> {
+    let r: SuccessText = client.call(path, &ids_params(ids)).await?;
+    println!("{}", r.success_text);
+    Ok(())
+}
+
+pub fn replurk_failures(r: &ReplurkResult) -> Vec<String> {
+    let mut failed: Vec<_> = r
+        .results
+        .iter()
+        .filter(|(_, i)| !i.success)
+        .map(|(id, i)| format!("{id}: {}", i.error))
+        .collect();
+    failed.sort();
+    failed
+}
+
+pub async fn replurk(client: &Client, path: &str, ids: &[u64]) -> Result<()> {
+    let r: ReplurkResult = client.call(path, &ids_params(ids)).await?;
+    let failed = replurk_failures(&r);
+    for line in &failed {
+        eprintln!("failed {line}");
+    }
+    println!("{}/{} ok", r.results.len() - failed.len(), r.results.len());
+    if r.success && failed.is_empty() {
+        Ok(())
+    } else {
+        Err(Error::Api {
+            status: 200,
+            message: format!("{} plurk(s) failed", failed.len().max(1)),
+        })
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -156,6 +195,23 @@ mod tests {
             vec![("plurk_id", "7".to_string())]
         );
         assert!(responses_params(7, Some(5)).contains(&("count", "5".to_string())));
+    }
+
+    #[test]
+    fn ids_are_json_list() {
+        assert_eq!(
+            ids_params(&[342, 23242]),
+            vec![("ids", "[342,23242]".to_string())]
+        );
+    }
+
+    #[test]
+    fn replurk_failures_reported() {
+        let r: ReplurkResult = serde_json::from_str(
+            r#"{"success": false, "results": {"1": {"success": true, "error": ""}, "2": {"success": false, "error": "no"}}}"#,
+        )
+        .unwrap();
+        assert_eq!(replurk_failures(&r), ["2: no"]);
     }
 
     #[test]

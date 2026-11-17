@@ -72,6 +72,36 @@ enum Commands {
         #[arg(short, long)]
         count: Option<u64>,
     },
+
+    Like {
+        #[arg(value_parser = commands::parse_plurk_ref, help = commands::PLURK_HELP, required = true)]
+        plurks: Vec<u64>,
+    },
+
+    Unlike {
+        #[arg(value_parser = commands::parse_plurk_ref, help = commands::PLURK_HELP, required = true)]
+        plurks: Vec<u64>,
+    },
+
+    Replurk {
+        #[arg(value_parser = commands::parse_plurk_ref, help = commands::PLURK_HELP, required = true)]
+        plurks: Vec<u64>,
+    },
+
+    Unreplurk {
+        #[arg(value_parser = commands::parse_plurk_ref, help = commands::PLURK_HELP, required = true)]
+        plurks: Vec<u64>,
+    },
+
+    Mute {
+        #[arg(value_parser = commands::parse_plurk_ref, help = commands::PLURK_HELP, required = true)]
+        plurks: Vec<u64>,
+    },
+
+    Unmute {
+        #[arg(value_parser = commands::parse_plurk_ref, help = commands::PLURK_HELP, required = true)]
+        plurks: Vec<u64>,
+    },
 }
 
 pub fn format_offset(t: &DateTime<Utc>) -> String {
@@ -182,6 +212,24 @@ async fn run(cli: Cli) -> Result<()> {
             qualifier,
         }) => commands::respond(&client, plurk, &content, &qualifier).await?,
         Some(Commands::Show { plurk, count }) => commands::show(&client, plurk, count).await?,
+        Some(Commands::Like { plurks }) => {
+            commands::set_flag(&client, "/Timeline/favoritePlurks", &plurks).await?
+        }
+        Some(Commands::Unlike { plurks }) => {
+            commands::set_flag(&client, "/Timeline/unfavoritePlurks", &plurks).await?
+        }
+        Some(Commands::Replurk { plurks }) => {
+            commands::replurk(&client, "/Timeline/replurk", &plurks).await?
+        }
+        Some(Commands::Unreplurk { plurks }) => {
+            commands::replurk(&client, "/Timeline/unreplurk", &plurks).await?
+        }
+        Some(Commands::Mute { plurks }) => {
+            commands::set_flag(&client, "/Timeline/mutePlurks", &plurks).await?
+        }
+        Some(Commands::Unmute { plurks }) => {
+            commands::set_flag(&client, "/Timeline/unmutePlurks", &plurks).await?
+        }
         _ => {
             let _ = Cli::command().print_help();
         }
