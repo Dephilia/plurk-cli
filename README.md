@@ -7,6 +7,18 @@ Currently in develop.
 ## Feature
 - Poll plurk information dynamically like Twitter
 
+## Install
+
+Download a prebuilt archive from [GitHub Releases](../../releases) (each has a `.sha256` file):
+
+- `x86_64-unknown-linux-musl`
+- `aarch64-unknown-linux-musl`
+- `x86_64-apple-darwin`
+- `aarch64-apple-darwin`
+- `x86_64-pc-windows-msvc`
+
+Release archives are built by `.github/workflows/release.yml` when a `v*` tag is pushed.
+
 ## Usage
 
 Build it, and run.
