@@ -7,12 +7,11 @@ use crate::error::PlurkError;
 use crate::plurk::{Plurk, PlurkData, PlurkUser};
 use crate::utils::base36_encode;
 use colored::Colorize;
-use dirs;
 use serde::Deserialize;
 use std::collections::HashMap;
 use std::fs;
 use std::path::PathBuf;
-use terminal_size::{terminal_size, Width};
+use terminal_size::{Width, terminal_size};
 use tokio::signal;
 
 #[derive(Deserialize, Debug)]

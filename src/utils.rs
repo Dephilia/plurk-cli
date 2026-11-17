@@ -15,7 +15,7 @@ pub fn base36_encode(value: u64) -> String {
         let i: usize = v as usize % 36;
         let b: char = base36[i] as char;
         result.push(b);
-        v = v / 36;
+        v /= 36;
         if v == 0 {
             break;
         }
@@ -26,7 +26,7 @@ pub fn base36_encode(value: u64) -> String {
 
 #[allow(dead_code)]
 pub fn limit_str(text: &str, limit: usize) -> String {
-    let text_size = text.chars().count() as usize;
+    let text_size = text.chars().count();
     let text = match text.find('\n') {
         Some(size) => match text.get(0..size) {
             Some(r) => r,
@@ -35,10 +35,10 @@ pub fn limit_str(text: &str, limit: usize) -> String {
         None => text,
     };
 
-    let str_size = text.chars().count() as usize;
+    let str_size = text.chars().count();
     let limit = cmp::min(limit, str_size);
 
-    let mut ret: String = text.chars().take(limit).skip(0).collect();
+    let mut ret: String = text.chars().take(limit).collect();
 
     if ret.chars().count() < text_size {
         ret.push_str(" ...<read more> ");
@@ -52,8 +52,9 @@ where
 {
     let s: &str = Deserialize::deserialize(deserializer)?;
 
-    Ok(DateTime::parse_from_rfc2822(&s).unwrap())
+    Ok(DateTime::parse_from_rfc2822(s).unwrap())
 }
 
+#[allow(dead_code)]
 #[derive(Debug, Deserialize)]
 pub struct WrappedDT(#[serde(deserialize_with = "from_rfc2822")] DateTime<FixedOffset>);

@@ -38,6 +38,7 @@ struct CometDatas {
 }
 
 #[derive(Deserialize, Debug)]
+#[allow(clippy::large_enum_variant)]
 #[serde(tag = "type")]
 pub enum CometContentUnit {
     #[serde(rename = "new_response")]
@@ -46,6 +47,7 @@ pub enum CometContentUnit {
         #[serde(rename = "plurk")]
         plurk_data: PlurkData,
         response: CometResponse,
+        #[allow(dead_code)]
         response_count: u64,
         user: HashMap<String, PlurkUser>,
     },
@@ -99,7 +101,7 @@ impl PlurkComet {
         let url = Url::parse(comet_url).map_err(|e| PlurkError::ParseError(e.to_string()))?;
         let query = match url.query() {
             Some(q) => q,
-            None => return Err(PlurkError::InvalidUrl(comet_url.to_string()).into()),
+            None => return Err(PlurkError::InvalidUrl(comet_url.to_string())),
         };
 
         let comet_datas: CometDatas =
@@ -132,9 +134,9 @@ impl PlurkComet {
             .timeout(Duration::from_secs(120))
             .send()
             .await
-            .map_err(|e| PlurkError::ReqwestError(e))?;
+            .map_err(PlurkError::ReqwestError)?;
 
-        let text = res.text().await.map_err(|e| PlurkError::ReqwestError(e))?;
+        let text = res.text().await.map_err(PlurkError::ReqwestError)?;
 
         let res = PlurkComet::query(text.as_str())?;
         self.offset = res.new_offset;
@@ -147,14 +149,14 @@ impl PlurkComet {
             .map_err(|e| PlurkError::InvalidCometData(e.to_string()))?;
         let mat = match re.captures(comet_callback) {
             Some(m) => m,
-            None => return Err(PlurkError::InvalidCometData(comet_callback.to_string()).into()),
+            None => return Err(PlurkError::InvalidCometData(comet_callback.to_string())),
         };
         serde_json::from_str(&mat[1])
             .map_err(|e| PlurkError::InvalidCometData(format!("{}\n{}", e, comet_callback)))
     }
 
     pub async fn knock(&self) -> Result<(), PlurkError> {
-        let url = Url::parse_with_params(&COMET_KNOCK, &[("channel", &self.channel)])
+        let url = Url::parse_with_params(COMET_KNOCK, &[("channel", &self.channel)])
             .map_err(|_| PlurkError::UrlError)?;
 
         let client = reqwest::Client::new();
@@ -163,7 +165,7 @@ impl PlurkComet {
             .get(url)
             .send()
             .await
-            .map_err(|e| PlurkError::ReqwestError(e))?;
+            .map_err(PlurkError::ReqwestError)?;
         Ok(())
     }
 

@@ -12,7 +12,6 @@ use app::*;
 use clap::{CommandFactory, Parser, Subcommand};
 use error::PlurkError;
 use plurk::Plurk;
-use tokio;
 
 #[derive(Parser)]
 #[command(author, version, about, long_about = None)]
@@ -84,7 +83,7 @@ async fn main() -> Result<(), PlurkError> {
             poll_comet(plurk.clone()).await?;
         }
         Some(Commands::Timeline { verbose, limit }) => {
-            print_timeline(plurk.clone(), verbose.clone(), limit.clone()).await?;
+            print_timeline(plurk.clone(), *verbose, *limit).await?;
         }
         None => {
             let mut cmd = Cli::command();

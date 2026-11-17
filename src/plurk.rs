@@ -6,7 +6,6 @@
 use crate::error::PlurkError;
 use crate::utils::*;
 use chrono::{self, DateTime, FixedOffset};
-use reqwest;
 use reqwest_oauth1::{OAuthClientProvider, Secrets, TokenReaderFuture};
 use serde::{Deserialize, Serialize};
 use std::fmt;
@@ -126,26 +125,24 @@ impl Plurk {
         let path = Path::new(path);
         let display = path.display();
 
-        let mut file =
-            File::open(&path).map_err(|_| PlurkError::IOError(format!("{}", display)))?;
+        let mut file = File::open(path).map_err(|_| PlurkError::IOError(display.to_string()))?;
 
         let mut s = String::new();
         file.read_to_string(&mut s)
-            .map_err(|_| PlurkError::IOError(format!("{}", display)))?;
+            .map_err(|_| PlurkError::IOError(display.to_string()))?;
 
-        toml::from_str(s.as_str()).map_err(|_| PlurkError::IOError(format!("{}", display)))
+        toml::from_str(s.as_str()).map_err(|_| PlurkError::IOError(display.to_string()))
     }
 
     pub fn to_toml<P: AsRef<Path>>(&self, path: P) -> Result<(), PlurkError> {
         let display = path.as_ref().display().to_string();
 
-        let mut file =
-            File::create(&path).map_err(|_| PlurkError::IOError(format!("{}", display)))?;
+        let mut file = File::create(path).map_err(|_| PlurkError::IOError(display.to_string()))?;
 
-        let s = toml::to_string(&self).map_err(|_| PlurkError::IOError(format!("{}", display)))?;
+        let s = toml::to_string(&self).map_err(|_| PlurkError::IOError(display.to_string()))?;
 
         file.write_all(s.as_bytes())
-            .map_err(|_| PlurkError::IOError(format!("{}", display)))?;
+            .map_err(|_| PlurkError::IOError(display.to_string()))?;
 
         Ok(())
     }
@@ -158,7 +155,7 @@ impl Plurk {
         }
     }
 
-    fn to_secret(&self) -> Secrets {
+    fn to_secret(&self) -> Secrets<'_> {
         match &self.oauth_token {
             Some(ot) if (ot.key.is_empty() || ot.secret.is_empty()) => {
                 Secrets::new(self.consumer.key.clone(), self.consumer.secret.clone())
@@ -170,13 +167,13 @@ impl Plurk {
     }
 
     pub async fn request(&self, api: &str) -> Result<reqwest::Response, PlurkError> {
-        let secrets = self.to_secret().clone();
-        Ok(reqwest::Client::new()
+        let secrets = self.to_secret();
+        reqwest::Client::new()
             .oauth1(secrets)
             .post(Plurk::cmd(api))
             .send()
             .await
-            .map_err(|e| PlurkError::OauthError(e))?)
+            .map_err(PlurkError::OauthError)
     }
 
     pub async fn request_query<T>(
@@ -185,16 +182,16 @@ impl Plurk {
         query: &T,
     ) -> Result<reqwest::Response, PlurkError>
     where
-        T: Serialize + ?Sized + Clone,
+        T: Serialize + Clone,
     {
-        let secrets = self.to_secret().clone();
-        Ok(reqwest::Client::new()
+        let secrets = self.to_secret();
+        reqwest::Client::new()
             .oauth1(secrets)
             .post(Plurk::cmd(api))
             .form(query)
             .send()
             .await
-            .map_err(|e| PlurkError::OauthError(e))?)
+            .map_err(PlurkError::OauthError)
     }
 
     pub async fn acquire_plurk_key(&mut self) -> Result<(), PlurkError> {
@@ -210,7 +207,7 @@ impl Plurk {
             .send()
             .parse_oauth_token()
             .await
-            .map_err(|e| PlurkError::OauthError(e))?;
+            .map_err(PlurkError::OauthError)?;
 
         // step 2. acquire user pin
         let endpoint_authorize = format!(
@@ -243,7 +240,7 @@ impl Plurk {
             .send()
             .parse_oauth_token()
             .await
-            .map_err(|e| PlurkError::OauthError(e))?;
+            .map_err(PlurkError::OauthError)?;
         let oauth_token = PlurkKeys {
             key: resp.oauth_token,
             secret: resp.oauth_token_secret,
