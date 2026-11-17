@@ -1,0 +1,139 @@
+use crate::client::Client;
+use crate::error::Result;
+use crate::render::{base36_decode, plurk_url};
+use serde::Deserialize;
+
+pub const PLURK_HELP: &str = "Plurk id: numeric id, base36 id (plurk.com/p/<id>), or a full plurk.com/p/<id> URL. An all-digit value is numeric, unless it comes from a URL, where it is base36";
+
+pub type Params = Vec<(&'static str, String)>;
+
+pub fn parse_plurk_ref(input: &str) -> std::result::Result<u64, String> {
+    let s = input.trim();
+    let invalid = || format!("invalid plurk id: {input}");
+    if s.starts_with("http://") || s.starts_with("https://") {
+        let (_, rest) = s.split_once("/p/").ok_or_else(invalid)?;
+        let id = rest.split(['/', '?', '#']).next().unwrap_or("");
+        return base36_decode(id).ok_or_else(invalid);
+    }
+    if !s.is_empty() && s.bytes().all(|b| b.is_ascii_digit()) {
+        return s.parse().map_err(|_| invalid());
+    }
+    base36_decode(s).ok_or_else(invalid)
+}
+
+pub fn post_params(
+    content: &str,
+    qualifier: &str,
+    private: bool,
+    no_comments: Option<u8>,
+    lang: Option<&str>,
+) -> Params {
+    let mut p: Params = vec![
+        ("content", content.to_string()),
+        ("qualifier", qualifier.to_string()),
+    ];
+    if private {
+        p.push(("limited_to", "[0]".to_string()));
+    }
+    if let Some(n) = no_comments {
+        p.push(("no_comments", n.to_string()));
+    }
+    if let Some(l) = lang {
+        p.push(("lang", l.to_string()));
+    }
+    p
+}
+
+pub fn respond_params(plurk_id: u64, content: &str, qualifier: &str) -> Params {
+    vec![
+        ("plurk_id", plurk_id.to_string()),
+        ("content", content.to_string()),
+        ("qualifier", qualifier.to_string()),
+    ]
+}
+
+#[derive(Deserialize)]
+struct PlurkAdded {
+    plurk_id: u64,
+}
+
+#[derive(Deserialize)]
+struct ResponseAdded {
+    id: u64,
+}
+
+pub async fn post(
+    client: &Client,
+    content: &str,
+    qualifier: &str,
+    private: bool,
+    no_comments: Option<u8>,
+    lang: Option<&str>,
+) -> Result<()> {
+    let params = post_params(content, qualifier, private, no_comments, lang);
+    let added: PlurkAdded = client.call("/Timeline/plurkAdd", &params).await?;
+    println!("{}", plurk_url(added.plurk_id));
+    Ok(())
+}
+
+pub async fn respond(client: &Client, plurk_id: u64, content: &str, qualifier: &str) -> Result<()> {
+    let params = respond_params(plurk_id, content, qualifier);
+    let added: ResponseAdded = client.call("/Responses/responseAdd", &params).await?;
+    println!("{} (response {})", plurk_url(plurk_id), added.id);
+    Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn plurk_ref_forms() {
+        assert_eq!(parse_plurk_ref("241403675"), Ok(241403675));
+        assert_eq!(parse_plurk_ref("3zq49n"), Ok(241403675));
+        assert_eq!(
+            parse_plurk_ref("https://www.plurk.com/p/3zq49n"),
+            Ok(241403675)
+        );
+        assert_eq!(
+            parse_plurk_ref("https://www.plurk.com/p/3zq49n?x=1#y"),
+            Ok(241403675)
+        );
+    }
+
+    #[test]
+    fn all_digit_ambiguity() {
+        assert_eq!(parse_plurk_ref("100"), Ok(100));
+        assert_eq!(parse_plurk_ref("https://www.plurk.com/p/100"), Ok(36 * 36));
+    }
+
+    #[test]
+    fn plurk_ref_rejects_garbage() {
+        for s in ["", "-1", "https://www.plurk.com/", "https://x/p/", "a b"] {
+            assert!(parse_plurk_ref(s).is_err(), "{s}");
+        }
+    }
+
+    #[test]
+    fn private_post_sends_limited_to() {
+        let p = post_params("hi", ":", true, None, None);
+        assert!(p.contains(&("limited_to", "[0]".to_string())));
+        assert!(p.contains(&("qualifier", ":".to_string())));
+        let p = post_params("hi", "says", false, Some(2), Some("en"));
+        assert!(!p.iter().any(|(k, _)| *k == "limited_to"));
+        assert!(p.contains(&("no_comments", "2".to_string())));
+        assert!(p.contains(&("lang", "en".to_string())));
+    }
+
+    #[test]
+    fn respond_param_vector() {
+        assert_eq!(
+            respond_params(7, "yo", ":"),
+            vec![
+                ("plurk_id", "7".to_string()),
+                ("content", "yo".to_string()),
+                ("qualifier", ":".to_string())
+            ]
+        );
+    }
+}

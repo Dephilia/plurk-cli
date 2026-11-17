@@ -1,5 +1,6 @@
 mod client;
 mod comet;
+mod commands;
 mod config;
 mod error;
 mod model;
@@ -43,6 +44,26 @@ enum Commands {
         verbose: bool,
         #[arg(short, long, default_value_t = 20)]
         limit: u64,
+    },
+
+    Post {
+        content: String,
+        #[arg(short, long, default_value = ":")]
+        qualifier: String,
+        #[arg(long)]
+        private: bool,
+        #[arg(long, value_parser = clap::value_parser!(u8).range(0..=2))]
+        no_comments: Option<u8>,
+        #[arg(long)]
+        lang: Option<String>,
+    },
+
+    Respond {
+        #[arg(value_parser = commands::parse_plurk_ref, help = commands::PLURK_HELP)]
+        plurk: u64,
+        content: String,
+        #[arg(short, long, default_value = ":")]
+        qualifier: String,
     },
 }
 
@@ -131,6 +152,28 @@ async fn run(cli: Cli) -> Result<()> {
             }
         }
         Some(Commands::Timeline { verbose, limit }) => timeline(&client, verbose, limit).await?,
+        Some(Commands::Post {
+            content,
+            qualifier,
+            private,
+            no_comments,
+            lang,
+        }) => {
+            commands::post(
+                &client,
+                &content,
+                &qualifier,
+                private,
+                no_comments,
+                lang.as_deref(),
+            )
+            .await?
+        }
+        Some(Commands::Respond {
+            plurk,
+            content,
+            qualifier,
+        }) => commands::respond(&client, plurk, &content, &qualifier).await?,
         _ => {
             let _ = Cli::command().print_help();
         }

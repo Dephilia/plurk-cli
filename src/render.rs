@@ -20,6 +20,16 @@ pub fn base36(mut v: u64) -> String {
     String::from_utf8(out).unwrap_or_default()
 }
 
+pub fn base36_decode(s: &str) -> Option<u64> {
+    if s.is_empty() {
+        return None;
+    }
+    s.chars().try_fold(0u64, |acc, c| {
+        let d = c.to_digit(36)?;
+        acc.checked_mul(36)?.checked_add(u64::from(d))
+    })
+}
+
 pub fn plurk_url(id: u64) -> String {
     format!("https://www.plurk.com/p/{}", base36(id))
 }
@@ -136,5 +146,16 @@ mod tests {
         assert_eq!(base36(35), "z");
         assert_eq!(base36(36), "10");
         assert_eq!(plurk_url(241403675), "https://www.plurk.com/p/3zq49n");
+    }
+
+    #[test]
+    fn base36_round_trip() {
+        for v in [0, 1, 35, 36, 1295, 241403675, u64::MAX] {
+            assert_eq!(base36_decode(&base36(v)), Some(v));
+        }
+        assert_eq!(base36_decode("3ZQ49N"), Some(241403675));
+        assert_eq!(base36_decode(""), None);
+        assert_eq!(base36_decode("a-b"), None);
+        assert_eq!(base36_decode("zzzzzzzzzzzzzzzz"), None);
     }
 }
