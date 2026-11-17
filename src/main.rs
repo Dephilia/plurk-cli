@@ -102,6 +102,13 @@ enum Commands {
         #[arg(value_parser = commands::parse_plurk_ref, help = commands::PLURK_HELP, required = true)]
         plurks: Vec<u64>,
     },
+
+    Unread,
+
+    Alerts {
+        #[arg(long)]
+        history: bool,
+    },
 }
 
 pub fn format_offset(t: &DateTime<Utc>) -> String {
@@ -230,6 +237,8 @@ async fn run(cli: Cli) -> Result<()> {
         Some(Commands::Unmute { plurks }) => {
             commands::set_flag(&client, "/Timeline/unmutePlurks", &plurks).await?
         }
+        Some(Commands::Unread) => commands::unread(&client).await?,
+        Some(Commands::Alerts { history }) => commands::alerts(&client, history).await?,
         _ => {
             let _ = Cli::command().print_help();
         }

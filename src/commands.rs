@@ -1,6 +1,6 @@
 use crate::client::Client;
 use crate::error::{Error, Result};
-use crate::model::{GetPlurk, ReplurkResult, ResponseList, SuccessText};
+use crate::model::{Alert, GetPlurk, ReplurkResult, ResponseList, SuccessText, UnreadCount};
 use crate::render::{self, base36_decode, plurk_url};
 use serde::Deserialize;
 
@@ -107,6 +107,28 @@ pub async fn show(client: &Client, plurk_id: u64, count: Option<u64>) -> Result<
     Ok(())
 }
 
+pub async fn unread(client: &Client) -> Result<()> {
+    let u: UnreadCount = client.call("/Polling/getUnreadCount", &[]).await?;
+    render::print_unread(&u);
+    Ok(())
+}
+
+pub fn alerts_path(history: bool) -> &'static str {
+    if history {
+        "/Alerts/getHistory"
+    } else {
+        "/Alerts/getActive"
+    }
+}
+
+pub async fn alerts(client: &Client, history: bool) -> Result<()> {
+    let list: Vec<Alert> = client.call(alerts_path(history), &[]).await?;
+    for a in &list {
+        println!("{}", render::alert_line(a));
+    }
+    Ok(())
+}
+
 pub fn ids_params(ids: &[u64]) -> Params {
     let list = ids.iter().map(u64::to_string).collect::<Vec<_>>().join(",");
     vec![("ids", format!("[{list}]"))]
@@ -195,6 +217,12 @@ mod tests {
             vec![("plurk_id", "7".to_string())]
         );
         assert!(responses_params(7, Some(5)).contains(&("count", "5".to_string())));
+    }
+
+    #[test]
+    fn alerts_endpoint() {
+        assert_eq!(alerts_path(false), "/Alerts/getActive");
+        assert_eq!(alerts_path(true), "/Alerts/getHistory");
     }
 
     #[test]

@@ -28,16 +28,27 @@ You'll need `key.toml` to configure Plurk oauth key.
 Usage: plurk [OPTIONS] [COMMAND]
 
 Commands:
-  gen-key
-  comet
-  me
-  timeline
-  help      Print this message or the help of the given subcommand(s)
+  gen-key    
+  comet      
+  me         
+  timeline   
+  post       
+  respond    
+  show       
+  like       
+  unlike     
+  replurk    
+  unreplurk  
+  mute       
+  unmute     
+  unread     
+  alerts     
+  help       Print this message or the help of the given subcommand(s)
 
 Options:
-  -k, --key-file <KEY_FILE>  [default: "/Users/dephilia/Library/Application Support/plurk-cli/key.toml"]
-  -h, --help                 Print help information
-  -V, --version              Print version information
+  -k, --key-file <KEY_FILE>  [default: <config dir>/plurk-cli/key.toml]
+  -h, --help                 Print help
+  -V, --version              Print version
 ```
 
 The example for `key.toml` is:

@@ -1,6 +1,6 @@
 use crate::client::Client;
 use crate::comet::Event;
-use crate::model::{GetPlurk, Plurk, Profile, Response, ResponseList, User};
+use crate::model::{Alert, GetPlurk, Plurk, Profile, Response, ResponseList, UnreadCount, User};
 use chrono::{DateTime, Local, Utc};
 use colored::Colorize;
 use std::collections::HashMap;
@@ -135,6 +135,29 @@ pub fn print_show(g: &GetPlurk, list: &ResponseList) {
     }
 }
 
+pub fn print_unread(u: &UnreadCount) {
+    println!(
+        "all: {}  my: {}  private: {}  responded: {}",
+        u.all, u.my, u.private, u.responded
+    );
+}
+
+pub fn alert_line(a: &Alert) -> String {
+    let when = a
+        .posted
+        .as_ref()
+        .map(local_time)
+        .unwrap_or_else(|| "-".to_string());
+    let mut line = format!("{when} {}", a.kind);
+    if let Some(u) = a.actor() {
+        line.push_str(&format!(" {}", u.nick_name));
+    }
+    if let Some(id) = a.plurk_id {
+        line.push_str(&format!(" {}", plurk_url(id)));
+    }
+    line
+}
+
 pub async fn print_event(client: &Client, event: &Event) {
     match event {
         Event::NewPlurk(p) => {
@@ -190,6 +213,17 @@ mod tests {
             .map(|r| response_name(r, &list.friends))
             .collect();
         assert_eq!(names, ["alvin", "Fox", "anonymous", "8"]);
+    }
+
+    #[test]
+    fn alert_lines() {
+        let a: Alert = serde_json::from_str(
+            r#"{"type":"plurk_liked","from_user":{"id":1,"nick_name":"amix"},"posted":"Fri, 05 Jun 2009 23:07:13 GMT","plurk_id":241403675}"#,
+        )
+        .unwrap();
+        assert!(alert_line(&a).ends_with("plurk_liked amix https://www.plurk.com/p/3zq49n"));
+        let a: Alert = serde_json::from_str(r#"{"type":"weird"}"#).unwrap();
+        assert_eq!(alert_line(&a), "- weird");
     }
 
     #[test]
