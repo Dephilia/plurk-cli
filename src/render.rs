@@ -1,6 +1,6 @@
 use crate::client::Client;
 use crate::comet::Event;
-use crate::model::{Plurk, Profile, Response, User};
+use crate::model::{GetPlurk, Plurk, Profile, Response, ResponseList, User};
 use chrono::{DateTime, Local, Utc};
 use colored::Colorize;
 use std::collections::HashMap;
@@ -101,6 +101,40 @@ fn print_response(r: &Response, name: &str) {
     );
 }
 
+pub const ANONYMOUS_ID: u64 = 99999;
+
+pub fn response_name(r: &Response, friends: &HashMap<String, User>) -> String {
+    if let Some(h) = r.handle.as_deref().filter(|h| !h.is_empty()) {
+        return h.to_string();
+    }
+    friends
+        .get(&r.user_id.to_string())
+        .map(|u| u.name().to_string())
+        .unwrap_or_else(|| {
+            if r.user_id == ANONYMOUS_ID {
+                "anonymous".to_string()
+            } else {
+                r.user_id.to_string()
+            }
+        })
+}
+
+pub fn print_show(g: &GetPlurk, list: &ResponseList) {
+    let p = &g.plurk;
+    println!("Plurk ==> {}", plurk_url(p.plurk_id));
+    println!(
+        "{} {} {}",
+        local_time(&p.posted).bright_yellow(),
+        g.user.name().bold().bright_blue(),
+        p.qualifier.black().on_bright_white()
+    );
+    println!("{}", p.text());
+    separator();
+    for r in &list.responses {
+        print_response(r, &response_name(r, &list.friends));
+    }
+}
+
 pub async fn print_event(client: &Client, event: &Event) {
     match event {
         Event::NewPlurk(p) => {
@@ -139,6 +173,24 @@ pub async fn print_event(client: &Client, event: &Event) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn response_names() {
+        let list: ResponseList = serde_json::from_str(
+            r#"{"friends": {"3": {"nick_name": "alvin", "id": 3}}, "responses": [
+            {"id":1,"plurk_id":1,"user_id":3,"qualifier":":","content":"a","posted":"Fri, 05 Jun 2009 23:08:13 GMT"},
+            {"id":2,"plurk_id":1,"user_id":99999,"qualifier":":","content":"b","handle":"Fox","posted":"Fri, 05 Jun 2009 23:08:13 GMT"},
+            {"id":3,"plurk_id":1,"user_id":99999,"qualifier":":","content":"b","posted":"Fri, 05 Jun 2009 23:08:13 GMT"},
+            {"id":4,"plurk_id":1,"user_id":8,"qualifier":":","content":"b","posted":"Fri, 05 Jun 2009 23:08:13 GMT"}]}"#,
+        )
+        .unwrap();
+        let names: Vec<_> = list
+            .responses
+            .iter()
+            .map(|r| response_name(r, &list.friends))
+            .collect();
+        assert_eq!(names, ["alvin", "Fox", "anonymous", "8"]);
+    }
 
     #[test]
     fn base36_urls() {

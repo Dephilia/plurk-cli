@@ -1,6 +1,7 @@
 use crate::client::Client;
 use crate::error::Result;
-use crate::render::{base36_decode, plurk_url};
+use crate::model::{GetPlurk, ResponseList};
+use crate::render::{self, base36_decode, plurk_url};
 use serde::Deserialize;
 
 pub const PLURK_HELP: &str = "Plurk id: numeric id, base36 id (plurk.com/p/<id>), or a full plurk.com/p/<id> URL. An all-digit value is numeric, unless it comes from a URL, where it is base36";
@@ -83,6 +84,29 @@ pub async fn respond(client: &Client, plurk_id: u64, content: &str, qualifier: &
     Ok(())
 }
 
+pub fn get_plurk_params(plurk_id: u64) -> Params {
+    vec![("plurk_id", plurk_id.to_string())]
+}
+
+pub fn responses_params(plurk_id: u64, count: Option<u64>) -> Params {
+    let mut p = get_plurk_params(plurk_id);
+    if let Some(c) = count {
+        p.push(("count", c.to_string()));
+    }
+    p
+}
+
+pub async fn show(client: &Client, plurk_id: u64, count: Option<u64>) -> Result<()> {
+    let plurk: GetPlurk = client
+        .call("/Timeline/getPlurk", &get_plurk_params(plurk_id))
+        .await?;
+    let list: ResponseList = client
+        .call("/Responses/get", &responses_params(plurk_id, count))
+        .await?;
+    render::print_show(&plurk, &list);
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -123,6 +147,15 @@ mod tests {
         assert!(!p.iter().any(|(k, _)| *k == "limited_to"));
         assert!(p.contains(&("no_comments", "2".to_string())));
         assert!(p.contains(&("lang", "en".to_string())));
+    }
+
+    #[test]
+    fn show_params() {
+        assert_eq!(
+            responses_params(7, None),
+            vec![("plurk_id", "7".to_string())]
+        );
+        assert!(responses_params(7, Some(5)).contains(&("count", "5".to_string())));
     }
 
     #[test]

@@ -88,6 +88,23 @@ pub struct PlurkList {
     pub plurk_users: HashMap<String, User>,
 }
 
+#[derive(Deserialize, Debug, Default)]
+pub struct ResponseList {
+    #[serde(default)]
+    pub responses: Vec<Response>,
+    #[serde(default)]
+    pub friends: HashMap<String, User>,
+    #[serde(default)]
+    pub responses_seen: u64,
+}
+
+#[derive(Deserialize, Debug)]
+pub struct GetPlurk {
+    #[serde(alias = "plurks")]
+    pub plurk: Plurk,
+    pub user: User,
+}
+
 #[derive(Deserialize, Debug)]
 pub struct Profile {
     pub user_info: User,
@@ -141,6 +158,29 @@ mod tests {
             &MINIMAL.replace("Fri, 05 Jun 2009 23:07:13 GMT", "garbage"),
         );
         assert!(r.is_err());
+    }
+
+    const RESPONSES: &str = r#"{"friends": {"3": {"display_name": "", "nick_name": "alvin", "id": 3}}, "responses_seen": 2, "responses": [{"lang": "en", "content_raw": "Reforms", "content": "Reforms", "user_id": 3, "plurk_id": 90812, "id": 5, "qualifier": "says", "posted": "Fri, 05 Jun 2009 23:08:13 GMT"}, {"content": "anon", "user_id": 99999, "plurk_id": 90812, "id": 6, "qualifier": ":", "handle": "Blue Fox", "my_anonymous": false, "posted": "Fri, 05 Jun 2009 23:09:13 GMT"}]}"#;
+
+    #[test]
+    fn responses_shape() {
+        let l: ResponseList = serde_json::from_str(RESPONSES).unwrap();
+        assert_eq!(l.responses.len(), 2);
+        assert_eq!(l.responses_seen, 2);
+        assert_eq!(l.friends["3"].name(), "alvin");
+        assert_eq!(l.responses[1].handle.as_deref(), Some("Blue Fox"));
+        let empty: ResponseList = serde_json::from_str("{}").unwrap();
+        assert!(empty.responses.is_empty());
+    }
+
+    #[test]
+    fn get_plurk_accepts_both_keys() {
+        for key in ["plurk", "plurks"] {
+            let body = format!(r#"{{"{key}": {MINIMAL}, "user": {USER_MIN}}}"#);
+            let g: GetPlurk = serde_json::from_str(&body).unwrap();
+            assert_eq!(g.plurk.plurk_id, 90812);
+            assert_eq!(g.user.name(), "amix3");
+        }
     }
 
     #[test]

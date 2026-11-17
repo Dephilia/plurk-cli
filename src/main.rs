@@ -65,6 +65,13 @@ enum Commands {
         #[arg(short, long, default_value = ":")]
         qualifier: String,
     },
+
+    Show {
+        #[arg(value_parser = commands::parse_plurk_ref, help = commands::PLURK_HELP)]
+        plurk: u64,
+        #[arg(short, long)]
+        count: Option<u64>,
+    },
 }
 
 pub fn format_offset(t: &DateTime<Utc>) -> String {
@@ -174,6 +181,7 @@ async fn run(cli: Cli) -> Result<()> {
             content,
             qualifier,
         }) => commands::respond(&client, plurk, &content, &qualifier).await?,
+        Some(Commands::Show { plurk, count }) => commands::show(&client, plurk, count).await?,
         _ => {
             let _ = Cli::command().print_help();
         }
