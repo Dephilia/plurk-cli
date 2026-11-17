@@ -1,275 +1,227 @@
-// comet.rs
-// Copyright (C) 2022 dephilia <me@dephilia.moe>
-// Distributed under terms of the MIT license.
-
-use crate::error::PlurkError;
-use crate::plurk::{Plurk, PlurkData, PlurkUser};
-use crate::utils::*;
-use chrono::{self, DateTime, FixedOffset};
-use colored::Colorize;
-use regex::Regex;
+use crate::client::{Client, api_error};
+use crate::error::{Error, Result};
+use crate::model::{Plurk, Response, User};
 use reqwest::Url;
 use serde::Deserialize;
-use serde_qs as qs;
 use std::collections::HashMap;
-use std::fmt;
 use std::time::Duration;
 
-const COMET_KNOCK: &str = "https://www.plurk.com/_comet/generic";
-
-#[derive(Clone, Debug)]
-pub struct PlurkComet {
-    base_url: String,
-    channel: String,
-    offset: i64,
+#[derive(Deserialize, Debug)]
+pub struct Channel {
+    pub comet_server: String,
+    pub channel_name: String,
 }
 
 #[derive(Deserialize, Debug)]
-pub struct UserChannel {
-    comet_server: String,
-    #[allow(dead_code)]
-    channel_name: String,
-}
-
-#[derive(Debug, PartialEq, Deserialize)]
-struct CometDatas {
-    channel: String,
-    offset: i64,
+pub struct Payload {
+    pub new_offset: i64,
+    pub data: Option<Vec<Event>>,
 }
 
 #[derive(Deserialize, Debug)]
-#[allow(clippy::large_enum_variant)]
+pub struct Counts {
+    #[serde(default)]
+    pub noti: u64,
+    #[serde(default)]
+    pub req: u64,
+}
+
+#[derive(Deserialize, Debug)]
 #[serde(tag = "type")]
-pub enum CometContentUnit {
-    #[serde(rename = "new_response")]
-    Response {
-        plurk_id: u64,
-        #[serde(rename = "plurk")]
-        plurk_data: PlurkData,
-        response: CometResponse,
-        #[allow(dead_code)]
-        response_count: u64,
-        user: HashMap<String, PlurkUser>,
-    },
+pub enum Event {
     #[serde(rename = "new_plurk")]
-    Plurk(PlurkData),
+    NewPlurk(Plurk),
+    #[serde(rename = "new_response")]
+    NewResponse {
+        plurk_id: u64,
+        plurk: Option<Plurk>,
+        response: Response,
+        #[serde(default)]
+        user: HashMap<String, User>,
+    },
     #[serde(rename = "update_notification")]
-    Notification { counts: CometNotiCount },
+    UpdateNotification { counts: Counts },
+    #[serde(other)]
+    Unknown,
 }
 
-#[allow(dead_code)]
-#[derive(Deserialize, Debug)]
-pub struct CometResponse {
-    content: String,
-    content_raw: String,
-    editability: u8,
-    id: u64,
-    lang: String,
-    last_edited: Option<WrappedDT>,
-    plurk_id: u64,
-    #[serde(deserialize_with = "from_rfc2822")]
-    pub posted: DateTime<FixedOffset>,
-    qualifier: String,
-    user_id: u64,
+pub struct Comet {
+    http: reqwest::Client,
+    url: Url,
+    channel: String,
+    offset: Option<i64>,
 }
 
-#[allow(dead_code)]
-#[derive(Deserialize, Debug)]
-pub struct CometNotiCount {
-    noti: u32,
-    req: u32,
-}
-
-#[derive(Deserialize, Debug)]
-struct CometContent {
-    new_offset: i64,
-    data: Option<Vec<CometContentUnit>>,
-}
-
-impl PlurkComet {
-    pub async fn from_plurk(plurk: Plurk) -> Result<Self, PlurkError> {
-        let resp = plurk.request("/APP/Realtime/getUserChannel").await?;
-
-        let body = resp
-            .json::<UserChannel>()
-            .await
-            .map_err(|e| PlurkError::ParseError(e.to_string()))?;
-
-        PlurkComet::new(body.comet_server.as_str())
+pub fn strip_jsonp(text: &str) -> &str {
+    match (text.find('{'), text.rfind('}')) {
+        (Some(a), Some(b)) if a <= b => &text[a..=b],
+        _ => text,
     }
-    pub fn new(comet_url: &str) -> Result<Self, PlurkError> {
-        let url = Url::parse(comet_url).map_err(|e| PlurkError::ParseError(e.to_string()))?;
-        let query = match url.query() {
-            Some(q) => q,
-            None => return Err(PlurkError::InvalidUrl(comet_url.to_string())),
-        };
+}
 
-        let comet_datas: CometDatas =
-            qs::from_str(query).map_err(|e| PlurkError::ParseError(e.to_string()))?;
+impl Comet {
+    pub async fn connect(client: &Client) -> Result<Self> {
+        let ch: Channel = client.call("/Realtime/getUserChannel", &[]).await?;
+        Self::new(client.http.clone(), &ch)
+    }
 
-        let url = url
-            .join("comet")
-            .map_err(|e| PlurkError::ParseError(e.to_string()))?;
-
-        Ok(PlurkComet {
-            base_url: Url::to_string(&url),
-            channel: comet_datas.channel,
-            offset: comet_datas.offset,
+    pub fn new(http: reqwest::Client, ch: &Channel) -> Result<Self> {
+        let mut url = Url::parse(&ch.comet_server).map_err(|e| Error::Url(e.to_string()))?;
+        let offset = url
+            .query_pairs()
+            .find(|(k, _)| k == "offset")
+            .and_then(|(_, v)| v.parse().ok());
+        url.set_query(None);
+        Ok(Self {
+            http,
+            url,
+            channel: ch.channel_name.clone(),
+            offset,
         })
     }
-    pub async fn poll_once_mut(&mut self) -> Result<Option<Vec<CometContentUnit>>, PlurkError> {
-        let url = Url::parse_with_params(
-            &self.base_url,
-            &[
-                ("channel", &self.channel),
-                ("offset", &self.offset.to_string()),
-            ],
-        )
-        .map_err(|_| PlurkError::UrlError)?;
 
-        let client = reqwest::Client::new();
+    pub fn request_url(&self) -> Url {
+        let mut url = self.url.clone();
+        {
+            let mut q = url.query_pairs_mut();
+            q.append_pair("channel", &self.channel);
+            if let Some(o) = self.offset {
+                q.append_pair("offset", &o.to_string());
+            }
+        }
+        url
+    }
 
-        let res = client
-            .get(url)
+    pub fn apply(&mut self, text: &str) -> Result<Vec<Event>> {
+        let payload: Payload =
+            serde_json::from_str(strip_jsonp(text)).map_err(|source| Error::Decode {
+                source,
+                body: text.chars().take(200).collect(),
+            })?;
+        match payload.new_offset {
+            -1 => {}
+            -3 => return Err(Error::Resync),
+            o => self.offset = Some(o),
+        }
+        Ok(payload.data.unwrap_or_default())
+    }
+
+    pub async fn poll(&mut self) -> Result<Vec<Event>> {
+        let resp = self
+            .http
+            .get(self.request_url())
             .timeout(Duration::from_secs(120))
             .send()
-            .await
-            .map_err(PlurkError::ReqwestError)?;
-
-        let text = res.text().await.map_err(PlurkError::ReqwestError)?;
-
-        let res = PlurkComet::query(text.as_str())?;
-        self.offset = res.new_offset;
-
-        Ok(res.data)
-    }
-
-    fn query(comet_callback: &str) -> Result<CometContent, PlurkError> {
-        let re = Regex::new(r"CometChannel.scriptCallback\((.*)\);")
-            .map_err(|e| PlurkError::InvalidCometData(e.to_string()))?;
-        let mat = match re.captures(comet_callback) {
-            Some(m) => m,
-            None => return Err(PlurkError::InvalidCometData(comet_callback.to_string())),
-        };
-        serde_json::from_str(&mat[1])
-            .map_err(|e| PlurkError::InvalidCometData(format!("{}\n{}", e, comet_callback)))
-    }
-
-    pub async fn knock(&self) -> Result<(), PlurkError> {
-        let url = Url::parse_with_params(COMET_KNOCK, &[("channel", &self.channel)])
-            .map_err(|_| PlurkError::UrlError)?;
-
-        let client = reqwest::Client::new();
-
-        let _res = client
-            .get(url)
-            .send()
-            .await
-            .map_err(PlurkError::ReqwestError)?;
-        Ok(())
-    }
-
-    pub async fn print_comet(plurk: &Plurk, comet: CometContentUnit) -> Result<(), PlurkError> {
-        #[derive(Deserialize)]
-        struct ObjGetPublicProfile {
-            user_info: PlurkUser,
+            .await?;
+        let status = resp.status().as_u16();
+        let text = resp.text().await?;
+        if !(200..300).contains(&status) {
+            return Err(api_error(status, &text));
         }
-        match comet {
-            CometContentUnit::Response {
-                plurk_id,
-                plurk_data,
-                response,
-                response_count: _,
-                user,
-            } => {
-                let resp = plurk
-                    .request_query(
-                        "/APP/Profile/getPublicProfile",
-                        &[("user_id", plurk_data.owner_id)],
-                    )
-                    .await?;
-
-                let plurk_owner = resp
-                    .json::<ObjGetPublicProfile>()
-                    .await
-                    .map_err(|e| PlurkError::ParseError(e.to_string()))?;
-
-                let display_name = plurk_owner.user_info.display_name;
-
-                let response_display_name = &user
-                    .get(&response.user_id.to_string())
-                    .unwrap()
-                    .display_name;
-                println!(
-                    "New response ==> https://www.plurk.com/p/{}",
-                    base36_encode(plurk_id)
-                );
-                println!(
-                    "{} {} {}",
-                    plurk_data
-                        .posted
-                        .with_timezone(&chrono::Local)
-                        .format("%Y-%m-%d %H:%M:%S")
-                        .to_string()
-                        .yellow(),
-                    display_name.bold().bright_blue(),
-                    plurk_data.qualifier.black().on_bright_white()
-                );
-                println!("{}", plurk_data.content_raw);
-                println!(" -------");
-                println!(
-                    "{} {} {} {}",
-                    response
-                        .posted
-                        .with_timezone(&chrono::Local)
-                        .format("%Y-%m-%d %H:%M:%S")
-                        .to_string()
-                        .yellow(),
-                    response_display_name.bold().bright_magenta(),
-                    response.qualifier.black().on_bright_white(),
-                    response.content_raw
-                );
-            }
-            CometContentUnit::Plurk(p) => {
-                let resp = plurk
-                    .request_query("/APP/Profile/getPublicProfile", &[("user_id", p.owner_id)])
-                    .await?;
-
-                let plurk_owner = resp
-                    .json::<ObjGetPublicProfile>()
-                    .await
-                    .map_err(|e| PlurkError::ParseError(e.to_string()))?;
-
-                let display_name = plurk_owner.user_info.display_name;
-                println!(
-                    "New plurk ==> https://www.plurk.com/p/{}",
-                    base36_encode(p.plurk_id)
-                );
-                println!(
-                    "{} {} {}",
-                    p.posted
-                        .with_timezone(&chrono::Local)
-                        .format("%Y-%m-%d %H:%M:%S")
-                        .to_string()
-                        .bright_yellow(),
-                    display_name.bold().bright_blue(),
-                    p.qualifier.black().on_bright_white()
-                );
-                println!("{}", p.content_raw);
-            }
-            CometContentUnit::Notification { counts } => {
-                println!("Notification: {:?}", counts);
-            }
-        };
-        Ok(())
+        self.apply(&text)
     }
 }
-impl fmt::Display for PlurkComet {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        write!(
-            f,
-            "<Comet>:\n\tBase Url: {}\n\tChannel: {}\n\tOffset: {}",
-            self.base_url, self.channel, self.offset
-        )
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    const CHANNEL: &str = r#"{"comet_server": "https://comet03.plurk.com/comet/1235515351741/?channel=generic-4-f733d8522327edf87b4d1651e6395a6cca0807a0",   "channel_name": "generic-4-f733d8522327edf87b4d1651e6395a6cca0807a0"}"#;
+    const NEW_PLURK: &str = r#"{"new_offset": 27, "data": [{"lang":"en", "content":"test another", "content_raw":"test another", "user_id":1, "plurk_type":1, "plurk_id":241403675, "type":"new_plurk", "response_count":0, "favorite":false, "qualifier":"says", "id":241403675, "is_unread":0, "responses_seen":0, "posted":"Tue, 02 Mar 2010 16:21:29 GMT", "limited_to":"|1||1|", "no_comments":0, "favorite_count":0, "owner_id":1, "_cid":27}]}"#;
+    const NEW_RESPONSE: &str = r#"{"new_offset": 21, "data": [{"plurk_id": 241392217, "response_count": 12, "type": "new_response", "response": {"id": 7, "plurk_id": 241392217, "user_id": 5737406, "lang":"en", "content":"@Zap: (cozy)", "content_raw":"@Zap: (cozy)", "qualifier": ":", "posted": "Tue, 02 Mar 2010 16:21:29 GMT"},"user": {"5737406": {"display_name":"","uid":5737406, "nick_name": "zed"}}, "_cid": 21}]}"#;
+
+    fn comet() -> Comet {
+        let ch: Channel = serde_json::from_str(CHANNEL).unwrap();
+        Comet::new(reqwest::Client::new(), &ch).unwrap()
+    }
+
+    #[test]
+    fn channel_url_per_spec() {
+        let c = comet();
+        assert_eq!(
+            c.request_url().as_str(),
+            "https://comet03.plurk.com/comet/1235515351741/?channel=generic-4-f733d8522327edf87b4d1651e6395a6cca0807a0"
+        );
+    }
+
+    #[test]
+    fn waiting_keeps_offset() {
+        let mut c = comet();
+        c.offset = Some(5);
+        assert!(c.apply(r#"{"new_offset": -1}"#).unwrap().is_empty());
+        assert_eq!(c.offset, Some(5));
+        assert!(c.request_url().as_str().ends_with("&offset=5"));
+    }
+
+    #[test]
+    fn resync_on_minus_three() {
+        let mut c = comet();
+        assert!(matches!(
+            c.apply(r#"{"new_offset": -3}"#),
+            Err(Error::Resync)
+        ));
+    }
+
+    #[test]
+    fn plain_offset_without_data() {
+        let mut c = comet();
+        assert!(c.apply(r#"{"new_offset": 3}"#).unwrap().is_empty());
+        assert_eq!(c.offset, Some(3));
+    }
+
+    #[test]
+    fn new_plurk_with_string_limited_to() {
+        let mut c = comet();
+        let ev = c.apply(NEW_PLURK).unwrap();
+        assert_eq!(c.offset, Some(27));
+        match &ev[0] {
+            Event::NewPlurk(p) => {
+                assert_eq!(p.plurk_id, 241403675);
+                assert_eq!(p.limited_to, Some(serde_json::json!("|1||1|")));
+            }
+            e => panic!("{e:?}"),
+        }
+    }
+
+    #[test]
+    fn new_response_carries_users() {
+        let mut c = comet();
+        let ev = c.apply(NEW_RESPONSE).unwrap();
+        match &ev[0] {
+            Event::NewResponse {
+                plurk_id,
+                plurk,
+                response,
+                user,
+            } => {
+                assert_eq!(*plurk_id, 241392217);
+                assert!(plurk.is_none());
+                assert_eq!(response.text(), "@Zap: (cozy)");
+                assert_eq!(user["5737406"].name(), "zed");
+            }
+            e => panic!("{e:?}"),
+        }
+    }
+
+    #[test]
+    fn jsonp_wrapped_and_unknown_events() {
+        let mut c = comet();
+        let wrapped = format!(
+            "CometChannel.scriptCallback({});\n",
+            r#"{"new_offset": 9, "data": [{"type": "something_new", "x": 1}, {"type": "update_notification", "counts": {"noti": 1, "req": 2}}]}"#
+        );
+        let ev = c.apply(&wrapped).unwrap();
+        assert_eq!(c.offset, Some(9));
+        assert!(matches!(ev[0], Event::Unknown));
+        assert!(matches!(ev[1], Event::UpdateNotification { .. }));
+        assert!(
+            c.apply(r#"CometChannel.scriptCallback({"new_offset": -1});"#)
+                .is_ok()
+        );
+    }
+
+    #[test]
+    fn garbage_is_error() {
+        assert!(matches!(comet().apply("<html>"), Err(Error::Decode { .. })));
     }
 }
